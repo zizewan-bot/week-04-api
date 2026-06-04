@@ -66,3 +66,21 @@ class BookStats(BaseModel):
     total_books: int
     by_status: dict[str, int]
     average_rating_for_read_books: float
+
+
+class AIChatRequest(BaseModel):
+    message: str
+    conversation_history: list[dict[str, str]] = Field(default_factory=list)
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("message cannot be empty")
+        return stripped
+
+
+class AIChatResponse(BaseModel):
+    reply: str
+    updated_history: list[dict[str, str]]

@@ -1,5 +1,7 @@
+import os
 from typing import Optional
 
+from anthropic import Anthropic
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -12,6 +14,12 @@ from database import Base, engine, get_db
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Book Tracker API", version="2.0.0")
+
+ANTHROPIC_MODEL = "claude-sonnet-4-6"
+BOOK_ASSISTANT_SYSTEM_PROMPT = (
+    "You are a helpful book assistant. Give clear, concise answers about books, "
+    "reading habits, and recommendations. Be honest when you are unsure."
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,6 +51,88 @@ def get_book_or_404(book_id: int, db: Session) -> models.Book:
     return book
 
 
+def get_anthropic_client() -> Anthropic:
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="ANTHROPIC_API_KEY is not configured in the backend environment.",
+        )
+    return Anthropic(api_key=api_key)
+
+
+def normalize_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
+    messages = []
+    for item in history:
+        role = item.get("role")
+        content = item.get("content")
+        if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
+            messages.append({"role": role, "content": content.strip()})
+    return messages
+
+
+def extract_reply_text(response) -> str:
+    text_parts = [
+        block.text
+        for block in response.content
+        if getattr(block, "type", None) == "text" and getattr(block, "text", None)
+    ]
+    reply = "\n".join(text_parts).strip()
+    if not reply:
+        raise HTTPException(
+            status_code=502,
+            detail="Anthropic returned an empty response.",
+        )
+    return reply
+
+
+def call_claude(
+    system_prompt: str,
+    messages: list[dict[str, str]],
+    max_tokens: int = 600,
+) -> str:
+    client = get_anthropic_client()
+    try:
+        response = client.messages.create(
+            model=ANTHROPIC_MODEL,
+            max_tokens=max_tokens,
+            system=system_prompt,
+            messages=messages,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Anthropic API error: {exc}",
+        ) from exc
+
+    return extract_reply_text(response)
+
+
+def format_books_for_prompt(books: list[models.Book]) -> str:
+    if not books:
+        return "No books are saved yet."
+
+    status_labels = {
+        "read": "Read books",
+        "reading": "Currently reading",
+        "want_to_read": "Want to read",
+    }
+    sections = []
+    for status in ["read", "reading", "want_to_read"]:
+        matching_books = [book for book in books if book.status == status]
+        if not matching_books:
+            sections.append(f"{status_labels[status]}: none")
+            continue
+
+        lines = []
+        for book in matching_books:
+            rating = f", rating {book.rating}/5" if book.rating is not None else ""
+            lines.append(f"- {book.title} by {book.author}{rating}")
+        sections.append(f"{status_labels[status]}:\n" + "\n".join(lines))
+
+    return "\n\n".join(sections)
+
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to Book Tracker API"}
@@ -51,6 +141,37 @@ def read_root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/ai/chat", response_model=schemas.AIChatResponse)
+def ai_chat(request: schemas.AIChatRequest):
+    history = normalize_history(request.conversation_history)
+    messages = [*history, {"role": "user", "content": request.message}]
+    reply = call_claude(BOOK_ASSISTANT_SYSTEM_PROMPT, messages)
+
+    updated_history = [*messages, {"role": "assistant", "content": reply}]
+    return {"reply": reply, "updated_history": updated_history}
+
+
+@app.post("/ai/recommend", response_model=schemas.AIChatResponse)
+def ai_recommend(request: schemas.AIChatRequest, db: Session = Depends(get_db)):
+    books = db.query(models.Book).order_by(models.Book.id).all()
+    book_context = format_books_for_prompt(books)
+    system_prompt = (
+        "You are a concise personalized book recommendation assistant. Use the "
+        "reader's saved book list as the main evidence, especially read books, "
+        "currently reading books, authors, and ratings when available. Avoid "
+        "recommending books already saved unless the user asks about them. Keep "
+        "the response practical and brief.\n\n"
+        f"Reader book context:\n{book_context}"
+    )
+
+    history = normalize_history(request.conversation_history)
+    messages = [*history, {"role": "user", "content": request.message}]
+    reply = call_claude(system_prompt, messages, max_tokens=700)
+
+    updated_history = [*messages, {"role": "assistant", "content": reply}]
+    return {"reply": reply, "updated_history": updated_history}
 
 
 @app.get("/books", response_model=list[schemas.BookRead])
