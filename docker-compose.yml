@@ -17,6 +17,8 @@ services:
 
   backend:
     build: .
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql://book_user:book_password@db:5432/book_tracker
     ports:
