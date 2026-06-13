@@ -25,3 +25,15 @@
 2. Structured recommendation format: This prompt asked for recommendations in a consistent format, such as title, reason, and why it fits the reader's history. The expected behavior is easier-to-read output with less rambling and more predictable sections.
 
 3. Books-only constraint: This prompt told the assistant to stay focused on books, authors, genres, reading habits, and recommendations. The expected behavior is fewer off-topic responses and clearer redirection when the user asks for something unrelated.
+
+## Week 6 Reflection
+
+1. Calling an LLM once means it only sees the prompt and returns one answer from that context. Using an agent means the model can inspect the request, choose tools, read tool results, and then decide what to do next. In this lab, a one-shot LLM could say how someone might track books, but the agent can actually look up Dune, mark it as read with five stars, and then check the current reading list before writing the final reply.
+
+2. Tool results work as user-role messages because the model does not really care about human identity in the abstract. It processes the whole conversation as structured context and uses each message as new evidence. That shows LLMs are pattern-matching over the running transcript, so if tool results are formatted clearly and attached to the right tool call, the model can use them to plan the next step.
+
+3. If tool descriptions are vague or wrong, the model may choose the wrong action or use the tool incorrectly. For example, if `update_book_status` were described as "edit a book" without saying it only updates status by id, Claude might try to use it to rename a book or pass a title instead of an id, which would create failed or unsafe actions.
+
+4. Claude Code likely works as a larger version of the same loop from this lab. It probably has tools for reading files, searching code, editing files, running tests, checking git state, and maybe opening docs or browsers. The loop is likely: read the user request, choose one or more tools, inspect results, decide the next action, and repeat until it has enough information to answer or complete the task.
+
+5. Delete-book permission without human confirmation can go wrong quickly because natural language is messy. The agent could delete the wrong book when titles are similar, when multiple books share an author, or when the user phrases something casually. That is why the agent should look up candidates first and ask for clarification before destructive actions when the target is ambiguous.
