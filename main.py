@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
+from agent import run_agent
 import models
 import schemas
 from database import Base, engine, get_db
@@ -21,9 +22,16 @@ BOOK_ASSISTANT_SYSTEM_PROMPT = (
     "reading habits, and recommendations. Be honest when you are unsure."
 )
 
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -172,6 +180,11 @@ def ai_recommend(request: schemas.AIChatRequest, db: Session = Depends(get_db)):
 
     updated_history = [*messages, {"role": "assistant", "content": reply}]
     return {"reply": reply, "updated_history": updated_history}
+
+
+@app.post("/ai/agent", response_model=schemas.AIAgentResponse)
+def ai_agent(request: schemas.AIAgentRequest, db: Session = Depends(get_db)):
+    return run_agent(request.message, db)
 
 
 @app.get("/books", response_model=list[schemas.BookRead])

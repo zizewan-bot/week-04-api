@@ -84,3 +84,26 @@ class AIChatRequest(BaseModel):
 class AIChatResponse(BaseModel):
     reply: str
     updated_history: list[dict[str, str]]
+
+
+class AIAgentRequest(BaseModel):
+    message: str
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("message cannot be empty")
+        return stripped
+
+
+class AgentStep(BaseModel):
+    tool: str
+    input: dict[str, object]
+    result: dict[str, object]
+
+
+class AIAgentResponse(BaseModel):
+    response: str
+    agent_steps: list[AgentStep]
